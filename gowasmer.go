@@ -207,6 +207,20 @@ func goRuntime(store *wasmer.Store, data *GoInstance) map[string]wasmer.IntoExte
 					return nil
 				},
 			},
+			"fs": map[string]interface{}{
+				"constants": map[string]interface{}{
+					"O_WRONLY": os.O_WRONLY,
+					"O_RDWR":   os.O_RDWR,
+					"O_CREAT":  os.O_CREATE,
+					"O_TRUNC":  os.O_TRUNC,
+					"O_APPEND": os.O_APPEND,
+					"O_EXCL":   os.O_EXCL,
+				},
+			},
+			"process": map[string]interface{}{
+				"pid":  1,
+				"ppid": 1,
+			},
 			"Object": func([]interface{}) interface{} {
 				return map[string]interface{}{}
 			},
@@ -346,6 +360,17 @@ func goRuntime(store *wasmer.Store, data *GoInstance) map[string]wasmer.IntoExte
 			wasmer.NewFunctionType(wasmer.NewValueTypes(wasmer.I32), wasmer.NewValueTypes()),
 			func(args []wasmer.Value) ([]wasmer.Value, error) {
 				//println("syscall/js.finalizeRef")
+				// sp := args[0].I32()
+				// sp >>= 0
+				// const id = this.mem.getUint32(sp + 8, true);
+				// this._goRefCounts[id]--;
+				// if (this._goRefCounts[id] === 0) {
+				//         const v = this._values[id];
+				//         this._values[id] = null;
+				//         this._ids.delete(v);
+				//         this._idPool.push(id);
+				// }
+
 				return []wasmer.Value{}, nil
 			},
 		),
@@ -472,6 +497,36 @@ func goRuntime(store *wasmer.Store, data *GoInstance) map[string]wasmer.IntoExte
 			wasmer.NewFunctionType(wasmer.NewValueTypes(wasmer.I32), wasmer.NewValueTypes()),
 			func(args []wasmer.Value) ([]wasmer.Value, error) {
 				//println("syscall/js.valueNew")
+				sp := args[0].I32()
+				sp >>= 0
+
+				v := data.loadValue(sp + 8)
+				vArgs := data.loadSliceOfValues(sp + 16)
+				// v is the "Object" function above (the prototype object, I assume)
+				// TODO: Do we need to verify?
+				vFn := v.(func([]interface{}) interface{})
+				result := vFn(vArgs)
+				if v, err := data.getsp(); /* see comment above */ err == nil {
+					sp = v.(int32)
+					sp >>= 0
+					data.storeValue(sp+40, result)
+					data.mem.Data()[sp+48] = 1
+				}
+				// data.storeValue(sp+40, result)
+				// data.storeValue(sp+48, byte(1))
+				// try {
+				//         const v = loadValue(sp + 8);
+				//         const args = loadSliceOfValues(sp + 16);
+				//         const result = Reflect.construct(v, args);
+				//         sp = this._inst.exports.getsp() >>> 0; // see comment above
+				//         storeValue(sp + 40, result);
+				//         this.mem.setUint8(sp + 48, 1);
+				// } catch (err) {
+				//         sp = this._inst.exports.getsp() >>> 0; // see comment above
+				//         storeValue(sp + 40, err);
+				//         this.mem.setUint8(sp + 48, 0);
+				// }
+
 				return []wasmer.Value{}, nil
 			},
 		),
@@ -494,6 +549,12 @@ func goRuntime(store *wasmer.Store, data *GoInstance) map[string]wasmer.IntoExte
 			wasmer.NewFunctionType(wasmer.NewValueTypes(wasmer.I32), wasmer.NewValueTypes()),
 			func(args []wasmer.Value) ([]wasmer.Value, error) {
 				//println("syscall/js.valuePrepareString")
+				sp := args[0].I32()
+				sp >>= 0
+				str := data.loadValue(sp + 8).(string)
+				data.storeValue(sp+16, str)
+				data.setInt64(sp+24, int64(len(str)))
+
 				return []wasmer.Value{}, nil
 			},
 		),
@@ -502,6 +563,11 @@ func goRuntime(store *wasmer.Store, data *GoInstance) map[string]wasmer.IntoExte
 			wasmer.NewFunctionType(wasmer.NewValueTypes(wasmer.I32), wasmer.NewValueTypes()),
 			func(args []wasmer.Value) ([]wasmer.Value, error) {
 				//println("syscall/js.valueLoadString")
+				sp := args[0].I32()
+				sp >>= 0
+				str := data.loadValue(sp + 8).(string)
+				dst := data.loadSlice(sp + 16)
+				copy(dst, []byte(str))
 				return []wasmer.Value{}, nil
 			},
 		),
